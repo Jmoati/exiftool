@@ -8,19 +8,19 @@ use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
 
 final class MediaDateDenormalizer implements DenormalizerInterface
 {
-    public const TYPE = 'MediaDate';
+    public const string TYPE = 'MediaDate';
 
     public function denormalize(
         mixed $data,
         string $type,
-        string $format = null,
-        array $context = []
+        ?string $format = null,
+        array $context = [],
     ): ?\DateTimeImmutable {
         assert(is_array($data));
-
+        /** @var array<string, array<string, mixed>> $data */
         foreach ($data as $datum) {
             foreach (['DateTimeOriginal', 'CreationDate', 'DateCreated'] as $key) {
-                if (isset($datum[$key])) {
+                if (isset($datum[$key]) && is_string($datum[$key])) {
                     try {
                         $now = new \DateTimeImmutable();
                         $date = new \DateTimeImmutable($datum[$key]);
@@ -31,7 +31,7 @@ final class MediaDateDenormalizer implements DenormalizerInterface
                                 return $date;
                             }
                         }
-                    } catch (\Exception $e) {
+                    } catch (\ValueError|\Exception) {
                     }
                 }
             }
@@ -40,7 +40,7 @@ final class MediaDateDenormalizer implements DenormalizerInterface
         return null;
     }
 
-    public function supportsDenormalization(mixed $data, string $type, string $format = null, array $context = []): bool
+    public function supportsDenormalization(mixed $data, string $type, ?string $format = null, array $context = []): bool
     {
         return is_array($data)
             && self::TYPE === $type;
@@ -49,7 +49,7 @@ final class MediaDateDenormalizer implements DenormalizerInterface
     public function getSupportedTypes(?string $format): array
     {
         return [
-          self::TYPE => true,
+            self::TYPE => true,
         ];
     }
 }

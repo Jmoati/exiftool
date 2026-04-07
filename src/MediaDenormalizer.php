@@ -12,10 +12,10 @@ final class MediaDenormalizer implements DenormalizerInterface, DenormalizerAwar
 {
     use DenormalizerAwareTrait;
 
-    public function denormalize(mixed $data, string $type, string $format = null, array $context = []): Media
+    public function denormalize(mixed $data, string $type, ?string $format = null, array $context = []): Media
     {
         assert(is_array($data));
-
+        /** @var array<string, array<string, mixed>> $data */
         unset(
             $data['SourceFile'],
             $data['ExifTool'],
@@ -44,7 +44,7 @@ final class MediaDenormalizer implements DenormalizerInterface, DenormalizerAwar
         );
     }
 
-    public function supportsDenormalization(mixed $data, string $type, string $format = null, array $context = []): bool
+    public function supportsDenormalization(mixed $data, string $type, ?string $format = null, array $context = []): bool
     {
         return is_array($data)
             && Media::class === $type;
