@@ -22,7 +22,7 @@ phpunit: vendor
 	$(RUN) vendor/bin/phpunit
 
 phpstan: vendor
-	$(RUN) vendor/bin/phpstan analyse -c phpstan.neon --level=9 src/
+	$(RUN) vendor/bin/phpstan analyse -c phpstan.neon --level=max src/
 
 cs: vendor
 	$(RUN) vendor/bin/php-cs-fixer fix --dry-run --diff --verbose

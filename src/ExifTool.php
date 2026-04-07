@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Jmoati\ExifTool;
 
-use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Serializer\Encoder\JsonDecode;
 use Symfony\Component\Serializer\Encoder\JsonEncoder;
@@ -23,7 +22,7 @@ final readonly class ExifTool
         $process = new Process(['which', 'exiftool']);
         $process->run();
 
-        if ($process->getExitCode() > Command::SUCCESS) {
+        if ($process->getExitCode() > 0) {
             throw new ExecutableCannotBeFoundException();
         }
 
