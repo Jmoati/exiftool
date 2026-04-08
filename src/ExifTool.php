@@ -11,34 +11,39 @@ use Symfony\Component\Serializer\Normalizer\ArrayDenormalizer;
 use Symfony\Component\Serializer\Serializer;
 use Symfony\Component\Serializer\SerializerInterface;
 
-final readonly class ExifTool
+final class ExifTool
 {
-    private string $exiftoolFile;
+    private static ?string $cachedExiftoolFile = null;
 
-    private SerializerInterface $serializer;
+    private static ?SerializerInterface $cachedSerializer = null;
 
     public function __construct()
     {
-        $process = new Process(['which', 'exiftool']);
-        $process->run();
+        if (null === self::$cachedExiftoolFile) {
+            $process = new Process(['which', 'exiftool']);
+            $process->run();
 
-        if ($process->getExitCode() > 0) {
-            throw new ExecutableCannotBeFoundException();
+            if ($process->getExitCode() > 0) {
+                throw new ExecutableCannotBeFoundException();
+            }
+
+            self::$cachedExiftoolFile = trim($process->getOutput());
         }
 
-        $this->exiftoolFile = str_replace(\PHP_EOL, '', $process->getOutput());
-        $this->serializer = new Serializer(
-            [
-                new MediaDenormalizer(),
-                new MediaDateDenormalizer(),
-                new MediaGpsDenormalizer(),
-                new MediaMimeTypeDenormalizer(),
-                new ArrayDenormalizer(),
-            ],
-            [
-                new JsonDecode([JsonDecode::ASSOCIATIVE => true]),
-            ]
-        );
+        if (null === self::$cachedSerializer) {
+            self::$cachedSerializer = new Serializer(
+                [
+                    new MediaDenormalizer(),
+                    new MediaDateDenormalizer(),
+                    new MediaGpsDenormalizer(),
+                    new MediaMimeTypeDenormalizer(),
+                    new ArrayDenormalizer(),
+                ],
+                [
+                    new JsonDecode([JsonDecode::ASSOCIATIVE => true]),
+                ]
+            );
+        }
     }
 
     public static function openFile(string $filename): Media
@@ -49,8 +54,8 @@ final readonly class ExifTool
     public function media(string $filename): Media
     {
         $command = match ($this->guessScheme($filename)) {
-            'http', 'https' => 'curl -s "$filename" | '.$this->exiftoolFile.' -charset UTF-8 -filesize# -all -c %+.6f -q -j -g -fast -',
-            default => $this->exiftoolFile.' -charset UTF-8 -filesize# -all -c %+.6f -q -j -g -fast "$filename"',
+            'http', 'https' => 'curl -s "$filename" | '.self::$cachedExiftoolFile.' -charset UTF-8 -filesize# -all -c %+.6f -q -j -g -fast -',
+            default => self::$cachedExiftoolFile.' -charset UTF-8 -filesize# -all -c %+.6f -q -j -g -fast "$filename"',
         };
 
         $process = Process::fromShellCommandline(
@@ -67,7 +72,7 @@ final readonly class ExifTool
         }
 
         /** @var Media[] $medias */
-        $medias = $this->serializer->deserialize(
+        $medias = self::$cachedSerializer->deserialize(
             data: $process->getOutput(),
             type: sprintf('%s[]', Media::class),
             format: JsonEncoder::FORMAT

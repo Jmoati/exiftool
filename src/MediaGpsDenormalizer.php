@@ -40,8 +40,11 @@ final class MediaGpsDenormalizer implements DenormalizerInterface
             }
 
             if (isset($datum[self::ALTITUDE_KEY]) && is_string($datum[self::ALTITUDE_KEY])) {
-                preg_match('/(\d+\.?\d*)/', $datum[self::ALTITUDE_KEY], $value);
-                $altitude = isset($value[1]) ? (float) $value[1] : null;
+                $altitude = (float) $datum[self::ALTITUDE_KEY] ?: null;
+            }
+
+            if (null !== $latitude && null !== $longitude && null !== $datetime && null !== $altitude) {
+                break;
             }
         }
 

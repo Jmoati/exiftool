@@ -18,18 +18,15 @@ final class MediaDateDenormalizer implements DenormalizerInterface
     ): ?\DateTimeImmutable {
         assert(is_array($data));
         /** @var array<string, array<string, mixed>> $data */
+        $now = new \DateTimeImmutable();
         foreach ($data as $datum) {
             foreach (['DateTimeOriginal', 'CreationDate', 'DateCreated'] as $key) {
                 if (isset($datum[$key]) && is_string($datum[$key])) {
                     try {
-                        $now = new \DateTimeImmutable();
                         $date = new \DateTimeImmutable($datum[$key]);
-                        $string = $date->format('Y-m-d H:i');
 
-                        if (preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\s[0-9]{2}:[0-9]{2}$/', $string)) {
-                            if ($string !== $now->format('Y-m-d H:i')) {
-                                return $date;
-                            }
+                        if ($date->format('Y-m-d H:i') !== $now->format('Y-m-d H:i')) {
+                            return $date;
                         }
                     } catch (\ValueError|\Exception) {
                     }
