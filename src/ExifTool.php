@@ -27,22 +27,7 @@ final class ExifTool
                 throw new ExecutableCannotBeFoundException();
             }
 
-            self::$cachedExiftoolFile = trim($process->getOutput());
-        }
-
-        if (null === self::$cachedSerializer) {
-            self::$cachedSerializer = new Serializer(
-                [
-                    new MediaDenormalizer(),
-                    new MediaDateDenormalizer(),
-                    new MediaGpsDenormalizer(),
-                    new MediaMimeTypeDenormalizer(),
-                    new ArrayDenormalizer(),
-                ],
-                [
-                    new JsonDecode([JsonDecode::ASSOCIATIVE => true]),
-                ]
-            );
+            self::$cachedExiftoolFile = mb_trim($process->getOutput());
         }
     }
 
@@ -72,7 +57,7 @@ final class ExifTool
         }
 
         /** @var Media[] $medias */
-        $medias = self::$cachedSerializer->deserialize(
+        $medias = self::serializer()->deserialize(
             data: $process->getOutput(),
             type: sprintf('%s[]', Media::class),
             format: JsonEncoder::FORMAT
@@ -84,6 +69,22 @@ final class ExifTool
     public static function create(): self
     {
         return new self();
+    }
+
+    private static function serializer(): SerializerInterface
+    {
+        return self::$cachedSerializer ??= new Serializer(
+            [
+                new MediaDenormalizer(),
+                new MediaDateDenormalizer(),
+                new MediaGpsDenormalizer(),
+                new MediaMimeTypeDenormalizer(),
+                new ArrayDenormalizer(),
+            ],
+            [
+                new JsonDecode([JsonDecode::ASSOCIATIVE => true]),
+            ]
+        );
     }
 
     private function guessScheme(string $filename): string
