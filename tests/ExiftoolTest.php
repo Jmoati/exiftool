@@ -44,6 +44,27 @@ final class ExiftoolTest extends TestCase
         $this->assertEquals('2002-07-13', $media->date->format('Y-m-d'));
     }
 
+    public function testTheDateKeepsItsSeparateOffset(): void
+    {
+        $media = ExifTool::openFile(realpath(__DIR__.'/dist/offset.jpg'));
+
+        $this->assertEquals('2023-04-19T21:35:09+02:00', $media->date?->format('c'));
+    }
+
+    public function testAVideoWithOnlyACreateDateIsDatedInUtc(): void
+    {
+        $media = ExifTool::openFile(realpath(__DIR__.'/dist/createdate.mp4'));
+
+        $this->assertEquals('2024-05-01T10:00:00+00:00', $media->date?->format('c'));
+    }
+
+    public function testAnAltitudeBelowSeaLevelIsNegative(): void
+    {
+        $media = ExifTool::openFile(realpath(__DIR__.'/dist/offset.jpg'));
+
+        $this->assertEquals(-12.0, $media->gps?->altitude);
+    }
+
     public function testICanReadTheLocation(): void
     {
         $media = ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'));
