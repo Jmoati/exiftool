@@ -38,19 +38,45 @@ final class ExifTool
 
     public function media(string $filename): Media
     {
-        $command = match ($this->guessScheme($filename)) {
-            'http', 'https' => 'curl -s "$filename" | '.self::$cachedExiftoolFile.' -charset UTF-8 -filesize# -all -c %+.6f -q -j -g -fast -',
-            default => self::$cachedExiftoolFile.' -charset UTF-8 -filesize# -all -c %+.6f -q -j -g -fast "$filename"',
-        };
+        if (!\in_array($this->guessScheme($filename), ['http', 'https'], true)) {
+            return $this->read($filename);
+        }
 
-        $process = Process::fromShellCommandline(
-            command: $command,
-            timeout: 0.0
+        // Not piped into exiftool: it needs to seek, e.g. to reach the moov atom an iPhone video writes after its
+        // data, and it keeps in memory everything it reads from a pipe.
+        $temporaryFile = tempnam(sys_get_temp_dir(), 'exiftool');
+
+        if (false === $temporaryFile) {
+            throw new RuntimeErrorException('Cannot create a temporary file.');
+        }
+
+        try {
+            $process = new Process(command: ['curl', '-sSfL', '-o', $temporaryFile, $filename], timeout: null);
+            $process->run();
+
+            if (!$process->isSuccessful()) {
+                throw new RuntimeErrorException(mb_trim($process->getErrorOutput()));
+            }
+
+            return $this->read($temporaryFile);
+        } finally {
+            unlink($temporaryFile);
+        }
+    }
+
+    public static function create(): self
+    {
+        return new self();
+    }
+
+    private function read(string $filename): Media
+    {
+        $process = new Process(
+            command: [(string) self::$cachedExiftoolFile, '-charset', 'UTF-8', '-filesize#', '-all', '-c', '%+.6f', '-q', '-j', '-g', '-fast', $filename],
+            timeout: null,
         );
 
-        $process->run(
-            env: ['filename' => $filename]
-        );
+        $process->run();
 
         if ($process->getExitCode() > 0 && !$process->getOutput()) {
             throw new RuntimeErrorException((string) $process->getExitCodeText());
@@ -64,11 +90,6 @@ final class ExifTool
         );
 
         return $medias[0];
-    }
-
-    public static function create(): self
-    {
-        return new self();
     }
 
     private static function serializer(): SerializerInterface
