@@ -11,6 +11,7 @@ final class MediaGpsDenormalizer implements DenormalizerInterface
     public const string LATITUDE_KEY = 'GPSLatitude';
     private const string LONGITUDE_KEY = 'GPSLongitude';
     private const string ALTITUDE_KEY = 'GPSAltitude';
+    private const string ALTITUDE_REF_KEY = 'GPSAltitudeRef';
     private const string DATETIME_KEY = 'GPSDateTime';
 
     public function denormalize(
@@ -41,6 +42,12 @@ final class MediaGpsDenormalizer implements DenormalizerInterface
 
             if (isset($datum[self::ALTITUDE_KEY]) && is_string($datum[self::ALTITUDE_KEY])) {
                 $altitude = (float) $datum[self::ALTITUDE_KEY] ?: null;
+
+                // The sign is either in the value ("12 m Below Sea Level") or in its own tag.
+                $below = 'Below Sea Level';
+                if (null !== $altitude && (str_contains($datum[self::ALTITUDE_KEY], $below) || $below === ($datum[self::ALTITUDE_REF_KEY] ?? null))) {
+                    $altitude = -$altitude;
+                }
             }
 
             if (null !== $latitude && null !== $longitude && null !== $datetime && null !== $altitude) {
