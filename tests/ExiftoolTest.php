@@ -8,6 +8,7 @@ use Jmoati\ExifTool\ExifTool;
 use Jmoati\ExifTool\Media;
 use Jmoati\ExifTool\MediaGps;
 use Jmoati\ExifTool\MediaGpsDenormalizer;
+use Jmoati\ExifTool\RuntimeErrorException;
 use PHPUnit\Framework\TestCase;
 
 final class ExiftoolTest extends TestCase
@@ -26,6 +27,13 @@ final class ExiftoolTest extends TestCase
 
         $this->assertInstanceOf(Media::class, $media);
         $this->assertTrue(is_array($media->data));
+    }
+
+    public function testAnHttpErrorIsNotReadAsTheFile(): void
+    {
+        $this->expectException(RuntimeErrorException::class);
+
+        ExifTool::openFile('https://symfony.com/images/logos/this-logo-does-not-exist.svg');
     }
 
     public function testICanReadTheDate(): void
