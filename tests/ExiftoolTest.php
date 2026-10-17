@@ -80,4 +80,45 @@ final class ExiftoolTest extends TestCase
 
         $this->assertEquals('image/jpeg', $media->mimetype);
     }
+
+    /**
+     * The exiftool kept open goes on after an error: the next file is read as if nothing happened.
+     */
+    public function testAMissingFileFailsAloneAndTheNextOneIsRead(): void
+    {
+        try {
+            ExifTool::openFile(__DIR__.'/dist/missing.jpg');
+            $this->fail('A RuntimeErrorException was expected.');
+        } catch (RuntimeErrorException $e) {
+            $this->assertStringContainsString('File not found', $e->getMessage());
+        }
+
+        $this->assertEquals('image/jpeg', ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'))->mimetype);
+    }
+
+    /**
+     * Each argument is a line of exiftool's input: a file name with a line break in it still reaches it whole.
+     */
+    public function testAFileNameWithALineBreakIsRead(): void
+    {
+        $directory = sys_get_temp_dir().'/exiftool-'.bin2hex(random_bytes(4));
+        mkdir($directory);
+        $file = $directory."/two\nlines #1.jpg";
+        copy(__DIR__.'/dist/GPS.jpg', $file);
+
+        try {
+            $this->assertEquals('2002-07-13', ExifTool::openFile($file)->date?->format('Y-m-d'));
+        } finally {
+            unlink($file);
+            rmdir($directory);
+        }
+    }
+
+    public function testAClosedExiftoolStartsAgainWithTheNextFile(): void
+    {
+        ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'));
+        ExifTool::close();
+
+        $this->assertEquals('image/jpeg', ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'))->mimetype);
+    }
 }
