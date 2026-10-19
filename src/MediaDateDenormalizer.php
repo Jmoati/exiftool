@@ -50,7 +50,7 @@ final class MediaDateDenormalizer implements DenormalizerInterface
                 try {
                     // QuickTime writes its CreateDate in UTC.
                     return new \DateTimeImmutable($value, 'QuickTime' === $group ? new \DateTimeZone('UTC') : null);
-                } catch (\ValueError|\Exception) {
+                } catch (\Exception) {
                 }
             }
         }

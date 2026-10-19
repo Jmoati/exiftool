@@ -82,7 +82,7 @@ final class ExiftoolTest extends TestCase
     }
 
     /**
-     * The exiftool kept open goes on after an error: the next file is read as if nothing happened.
+     * A missing file fails alone: the next one is read as if nothing happened.
      */
     public function testAMissingFileFailsAloneAndTheNextOneIsRead(): void
     {
@@ -97,7 +97,7 @@ final class ExiftoolTest extends TestCase
     }
 
     /**
-     * Each argument is a line of exiftool's input: a file name with a line break in it still reaches it whole.
+     * No command line between the file and ExifTool: a file name with a line break in it is read as it is.
      */
     public function testAFileNameWithALineBreakIsRead(): void
     {
@@ -114,11 +114,16 @@ final class ExiftoolTest extends TestCase
         }
     }
 
-    public function testAClosedExiftoolStartsAgainWithTheNextFile(): void
+    /**
+     * As `exiftool -j -g -filesize#` gives them, but the version of ExifTool: grouped, the size in bytes, the numbers
+     * as numbers.
+     */
+    public function testTheTagsAreThoseOfTheCommandLine(): void
     {
-        ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'));
-        ExifTool::close();
+        $media = ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'));
 
-        $this->assertEquals('image/jpeg', ExifTool::openFile(realpath(__DIR__.'/dist/GPS.jpg'))->mimetype);
+        $this->assertSame(filesize(__DIR__.'/dist/GPS.jpg'), $media->data['File']['FileSize']);
+        $this->assertSame(['File', 'EXIF'], \array_slice(array_keys($media->data), 0, 2));
+        $this->assertIsFloat($media->data['EXIF']['GPSLatitude']);
     }
 }
