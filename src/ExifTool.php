@@ -4,50 +4,27 @@ declare(strict_types=1);
 
 namespace Jmoati\ExifTool;
 
-use Symfony\Component\Process\InputStream;
-use Symfony\Component\Process\Process;
-use Symfony\Component\Serializer\Encoder\JsonDecode;
-use Symfony\Component\Serializer\Encoder\JsonEncoder;
-use Symfony\Component\Serializer\Normalizer\ArrayDenormalizer;
+use Image\ExifTool\ExifTool as ImageExifTool;
+use Image\ExifTool\Perl;
+use Image\ExifTool\ScalarRef;
 use Symfony\Component\Serializer\Serializer;
-use Symfony\Component\Serializer\SerializerInterface;
 
+/**
+ * The metadata of a file, read by ExifTool ported to PHP (jmoati/image-exiftool) in the process itself: neither Perl
+ * nor an exiftool to run. They come by family 0 group, as `exiftool -j -g -fast -c %+.6f -filesize#` prints them.
+ */
 final class ExifTool
 {
-    private const array ARGUMENTS = ['-charset', 'UTF-8', '-filesize#', '-all', '-c', '%+.6f', '-q', '-j', '-g', '-fast'];
-
-    private static ?string $cachedExiftoolFile = null;
-
-    private static ?SerializerInterface $cachedSerializer = null;
-
-    /**
-     * One exiftool kept open (-stay_open), which reads the files one after the other: Perl and ExifTool load once,
-     * not once per file. Started with the first file, again if it stopped.
-     */
-    private static ?Process $process = null;
-
-    private static ?InputStream $input = null;
-
-    /** Numbers each file sent: exiftool ends its answer with "{readyN}", on stdout and stderr. */
-    private static int $executions = 0;
-
-    public function __construct()
-    {
-        if (null === self::$cachedExiftoolFile) {
-            $process = new Process(['which', 'exiftool']);
-            $process->run();
-
-            if ($process->getExitCode() > 0) {
-                throw new ExecutableCannotBeFoundException();
-            }
-
-            self::$cachedExiftoolFile = mb_trim($process->getOutput());
-        }
-    }
+    private static ?Serializer $cachedSerializer = null;
 
     public static function openFile(string $filename): Media
     {
         return self::create()->media($filename);
+    }
+
+    public static function create(): self
+    {
+        return new self();
     }
 
     public function media(string $filename): Media
@@ -56,8 +33,7 @@ final class ExifTool
             return $this->read($filename);
         }
 
-        // Not piped into exiftool: it needs to seek, e.g. to reach the moov atom an iPhone video writes after its
-        // data, and it keeps in memory everything it reads from a pipe.
+        // A local copy: ExifTool seeks in the file, e.g. to reach the moov atom an iPhone video writes after its data.
         $temporaryFile = tempnam(sys_get_temp_dir(), 'exiftool');
 
         if (false === $temporaryFile) {
@@ -65,11 +41,9 @@ final class ExifTool
         }
 
         try {
-            $process = new Process(command: ['curl', '-sSfL', '-o', $temporaryFile, $filename], timeout: null);
-            $process->run();
-
-            if (!$process->isSuccessful()) {
-                throw new RuntimeErrorException(mb_trim($process->getErrorOutput()));
+            // An HTTP error fails the copy: it is not read as the file.
+            if (!@copy($filename, $temporaryFile)) {
+                throw new RuntimeErrorException(\sprintf('Cannot download "%s".', $filename));
             }
 
             return $this->read($temporaryFile);
@@ -78,120 +52,113 @@ final class ExifTool
         }
     }
 
-    public static function create(): self
-    {
-        return new self();
-    }
-
-    /**
-     * Stops the exiftool kept open. The next file starts another one.
-     */
-    public static function close(): void
-    {
-        if (self::$process?->isRunning()) {
-            self::$input?->write("-stay_open\nFalse\n");
-            self::$input?->close();
-            self::$process->wait();
-        }
-
-        self::$process = null;
-        self::$input = null;
-    }
-
     private function read(string $filename): Media
     {
-        [$output, $errors] = $this->execute([...self::ARGUMENTS, $filename]);
+        /** @var Media $media */
+        $media = self::serializer()->denormalize(self::data($filename), Media::class);
 
-        if ('' === mb_trim($output)) {
-            throw new RuntimeErrorException('' !== $errors ? $errors : \sprintf('ExifTool read nothing from "%s".', $filename));
-        }
-
-        /** @var Media[] $medias */
-        $medias = self::serializer()->deserialize(
-            data: $output,
-            type: \sprintf('%s[]', Media::class),
-            format: JsonEncoder::FORMAT
-        );
-
-        return $medias[0];
+        return $media;
     }
 
     /**
-     * Sends the arguments of a command to the exiftool kept open, and waits for its answer.
+     * The tags of a file, by family 0 group, as the command line gives them: -j lists the duplicates and -g sorts them
+     * by group, where each name keeps its first value. -charset UTF-8, -c %+.6f and -fast are options of its own.
      *
-     * @param list<string> $arguments
-     *
-     * @return array{string, string} what exiftool wrote to stdout, and to stderr
+     * @return array<string, array<string, mixed>>
      */
-    private function execute(array $arguments): array
+    private static function data(string $filename): array
     {
-        $process = self::process();
-        $ready = \sprintf('{ready%d}', ++self::$executions);
-
-        // stderr gets the same mark: the errors of a file are not taken for those of the next one.
-        $command = [...$arguments, '-echo4', $ready, '-execute'.self::$executions];
-        self::$input?->write(implode("\n", array_map(self::argument(...), $command))."\n");
-
-        $stdout = $stderr = '';
-        $process->waitUntil(static function (string $type, string $data) use (&$stdout, &$stderr, $ready): bool {
-            Process::OUT === $type ? $stdout .= $data : $stderr .= $data;
-
-            return str_contains($stdout, $ready) && str_contains($stderr, $ready);
-        });
-
-        // The answers stay in the process's buffers otherwise, one after the other.
-        $process->clearOutput()->clearErrorOutput();
-
-        if (!str_contains($stdout, $ready) || !str_contains($stderr, $ready)) {
-            self::close();
-
-            throw new RuntimeErrorException(mb_trim($stderr) ?: 'ExifTool stopped.');
+        // As the command line, which checks before reading
+        if (!is_file($filename)) {
+            throw new RuntimeErrorException(\sprintf('File not found - %s', $filename));
         }
 
-        return [mb_strstr($stdout, $ready, true) ?: '', mb_trim(mb_strstr($stderr, $ready, true) ?: '')];
-    }
+        $exifTool = new ImageExifTool();
+        $exifTool->Options('Duplicates', 1, 'List', 1, 'Sort', 'Group0', 'Charset', 'UTF8', 'CoordFormat', '%+.6f', 'FastScan', 1);
 
-    private static function process(): Process
-    {
-        if (null !== self::$process && self::$process->isRunning()) {
-            return self::$process;
+        /** @var array<string, mixed> $info */
+        $info = $exifTool->ImageInfo($filename, ['all']);
+
+        $data = [];
+        /** @var list<string> $tags */
+        $tags = $exifTool->IO_TAG_LIST ?? [];
+        foreach ($tags as $tag) {
+            self::add($data, $exifTool, $info, $tag);
         }
 
-        self::$input = new InputStream();
-        self::$process = new Process([(string) self::$cachedExiftoolFile, '-stay_open', 'True', '-@', '-'], timeout: null);
-        self::$process->setInput(self::$input);
-        self::$process->start();
+        // -filesize#: in bytes, not "1.2 MB"
+        if (isset($data['File']['FileSize'])) {
+            $data['File']['FileSize'] = filesize($filename);
+        }
 
-        return self::$process;
+        return $data;
     }
 
     /**
-     * An argument as one line of exiftool's -@ file, which skips a line starting with "#" and the white space a line
-     * starts with: such an argument, or one with a line break, goes as a C string.
+     * @param array<string, array<string, mixed>> $data
+     * @param array<string, mixed>                $info
      */
-    private static function argument(string $argument): string
+    private static function add(array &$data, ImageExifTool $exifTool, array $info, string $tag): void
     {
-        if (!preg_match('/^[#\s]|[\r\n]/', $argument)) {
-            return $argument;
+        $value = $info[$tag] ?? null;
+        if (null === $value) {
+            return;
         }
 
-        return '#[CSTR]'.strtr($argument, ['\\' => '\\\\', "\n" => '\\n', "\r" => '\\r', "\t" => '\\t']);
+        $group = $exifTool->GetGroup($tag, 0);
+        $group = \is_string($group) && '' !== $group ? $group : 'Unknown';
+
+        // A duplicate, "Tag (1)", would hide the priority tag of its group: it is the one left out.
+        if (preg_match('/^(.*?) ?\(/', $tag, $match) && isset($info[$match[1]]) && $group === $exifTool->GetGroup($match[1], 0)) {
+            return;
+        }
+
+        $name = Perl::str(ImageExifTool::GetTagName($tag));
+        if (!\array_key_exists($name, $data[$group] ?? [])) {
+            $data[$group][$name] = self::value($value);
+        }
     }
 
-    private static function serializer(): SerializerInterface
+    /**
+     * A value as JSON gives it: a number or a boolean when it reads as one, binary data told by its size.
+     */
+    private static function value(mixed $value): mixed
     {
-        return self::$cachedSerializer ??= new Serializer(
-            [
-                new MediaDenormalizer(),
-                new MediaDateDenormalizer(),
-                new MediaGpsDenormalizer(),
-                new MediaMimeTypeDenormalizer(),
-                new ArrayDenormalizer(),
-            ],
-            [
-                new JsonDecode([JsonDecode::ASSOCIATIVE => true]),
-            ]
-        );
+        if (\is_array($value)) {
+            return array_map(self::value(...), $value);
+        }
+
+        if ($value instanceof ScalarRef) {
+            // Its size in bytes, not in characters
+            $binary = Perl::str($value->value);
+
+            return 1 === preg_match('/^Binary data \d+ bytes$/', $binary)
+                ? "($binary, use -b option to extract)"
+                : \sprintf('(Binary data %d bytes, use -b option to extract)', mb_strlen($binary, '8bit'));
+        }
+
+        $string = str_replace("\0", '', Perl::str($value));
+
+        if (1 === preg_match('/^(true|false)$/i', $string)) {
+            return 'true' === mb_strtolower($string);
+        }
+
+        // The numbers of JSON, those of ExifTool's own output
+        if (1 === preg_match('/^-?(\d|[1-9]\d{1,14})(\.\d{1,16})?(e[-+]?\d{1,3})?$/i', $string)) {
+            return json_decode($string);
+        }
+
+        return $string;
+    }
+
+    private static function serializer(): Serializer
+    {
+        return self::$cachedSerializer ??= new Serializer([
+            new MediaDenormalizer(),
+            new MediaDateDenormalizer(),
+            new MediaGpsDenormalizer(),
+            new MediaMimeTypeDenormalizer(),
+        ]);
     }
 
     private function guessScheme(string $filename): string

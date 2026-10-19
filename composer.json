@@ -9,7 +9,7 @@
   "license": "MIT",
   "require": {
     "php": ">=8.5",
-    "symfony/process": "^8.1",
+    "jmoati/image-exiftool": "^13.59",
     "symfony/serializer": "^8.1"
   },
   "autoload": {
